@@ -1,0 +1,159 @@
+diff --git a/src/AircraftManager.h b/src/AircraftManager.h
+--- a/src/AircraftManager.h
++++ b/src/AircraftManager.h
+@@
+ private:
++    int zoomIndex = 0;
+@@
+ public:
++    void ZoomIn();
++    void ZoomOut();
++    void ResetZoom();
+
+diff --git a/src/AircraftManager.cpp b/src/AircraftManager.cpp
+--- a/src/AircraftManager.cpp
++++ b/src/AircraftManager.cpp
+@@
+ constexpr int SCREEN_SIZE = 240;
+ constexpr int SCREEN_SIZE_DIV_2 = (SCREEN_SIZE / 2);
++static constexpr float ZOOM_FACTORS[] = {1.0f, 0.5f, 0.25f, 0.10f};
++static constexpr int ZOOM_LEVEL_COUNT =
++    sizeof(ZOOM_FACTORS) / sizeof(ZOOM_FACTORS[0]);
+
+@@
+ void AircraftManager::DrawRadarCircles(LGFX_Sprite &backbuffer) const
+ {
+     constexpr int CENTRE = SCREEN_SIZE_DIV_2 - 1;
+     constexpr int OUTER = SCREEN_SIZE_DIV_2 - 5;
+     backbuffer.drawCircle(CENTRE, CENTRE, OUTER, lgfx::color888(0, 200, 0));
+     backbuffer.drawCircle(CENTRE, CENTRE, (OUTER / 3) * 2, lgfx::color888(0, 64, 0));
+     backbuffer.drawCircle(CENTRE, CENTRE, OUTER / 3, lgfx::color888(0, 32, 0));
++
++    // Compass reference: screen is north-up.
++    backbuffer.setTextSize(1);
++    backbuffer.setTextColor(lgfx::color888(0, 220, 0));
++    backbuffer.drawCentreString("N", CENTRE, 5);
++    backbuffer.drawRightString("E", SCREEN_SIZE - 5, CENTRE - 4);
++
++    // "rad" is the configured latitude/longitude half-span in degrees.
++    // 1 degree latitude is ~111.32 km, which is accurate enough for the
++    // compact on-screen range label.
++    const float displayRadiusDeg = rad * ZOOM_FACTORS[zoomIndex];
++    const float displayRadiusKm = displayRadiusDeg * 111.32f;
++    char rangeText[20];
++    snprintf(rangeText, sizeof(rangeText), "R %.1f km", displayRadiusKm);
++    backbuffer.drawCentreString(rangeText, CENTRE, SCREEN_SIZE - 18);
+ }
+
+@@
+ std::pair<int, int> AircraftManager::ProjectCoordinateToScreen(float predLat, float predLon) const
+ {
+     const float dLon = predLon - lon;
+     const float dLat = predLat - lat;
+-    const float normLon = (dLon + rad) / (2.0f * rad);
+-    const float normLat = (dLat + rad) / (2.0f * rad);
++    const float displayRad = rad * ZOOM_FACTORS[zoomIndex];
++    const float normLon = (dLon + displayRad) / (2.0f * displayRad);
++    const float normLat = (dLat + displayRad) / (2.0f * displayRad);
+
+     const int x = static_cast<int>(normLon * SCREEN_SIZE);
+     const int y = static_cast<int>(SCREEN_SIZE - (normLat * SCREEN_SIZE));
+
+     return {x, y};
+ }
+
++void AircraftManager::ZoomIn()
++{
++    if (currentScreen != SCREEN_RADAR)
++        return;
++    if (zoomIndex < ZOOM_LEVEL_COUNT - 1)
++        ++zoomIndex;
++}
++
++void AircraftManager::ZoomOut()
++{
++    if (currentScreen != SCREEN_RADAR)
++        return;
++    if (zoomIndex > 0)
++        --zoomIndex;
++}
++
++void AircraftManager::ResetZoom()
++{
++    if (currentScreen != SCREEN_RADAR)
++        return;
++    zoomIndex = 0;
++}
+
+diff --git a/src/main.cpp b/src/main.cpp
+--- a/src/main.cpp
++++ b/src/main.cpp
+@@
+ void loop()
+ {
++  static bool lastButtonState = HIGH;
++  static unsigned long buttonDownAt = 0;
++  static bool buttonUsedForZoom = false;
++
++  bool currentButtonState = digitalRead(ENCODER_SW);
++
++  // Start timing a possible click / long-press.
++  if (lastButtonState == HIGH && currentButtonState == LOW)
++  {
++    buttonDownAt = millis();
++    buttonUsedForZoom = false;
++  }
++
+   int64_t pos = encoder.getCount();
+   if (pos != lastEncoderPos)
+   {
+-    if (pos > lastEncoderPos)
++    // Hold the encoder button while rotating to zoom.
++    if (currentButtonState == LOW)
+     {
+-      aircraftManager.SelectNextAircraft();
++      if (pos > lastEncoderPos)
++        aircraftManager.ZoomIn();
++      else
++        aircraftManager.ZoomOut();
++
++      buttonUsedForZoom = true;
+     }
+     else
+     {
+-      aircraftManager.SelectPreviousAircraft();
++      // Normal rotation keeps the existing aircraft-selection behaviour.
++      if (pos > lastEncoderPos)
++        aircraftManager.SelectNextAircraft();
++      else
++        aircraftManager.SelectPreviousAircraft();
+     }
+
+     lastEncoderPos = pos;
+   }
+
+-  static bool lastButtonState = HIGH;
+-
+-  bool currentButtonState = digitalRead(ENCODER_SW);
+-
+-  if (lastButtonState == HIGH &&
+-      currentButtonState == LOW)
++  // Long press: return to the widest/default radar range.
++  if (currentButtonState == LOW &&
++      !buttonUsedForZoom &&
++      millis() - buttonDownAt >= 1500)
+   {
+-    aircraftManager.EncoderClick();
++    aircraftManager.ResetZoom();
++    buttonUsedForZoom = true;
++  }
++
++  // Short press: keep the existing radar/details toggle.
++  // It fires on release so press+rotate can be reserved for zoom.
++  if (lastButtonState == LOW && currentButtonState == HIGH)
++  {
++    if (!buttonUsedForZoom)
++      aircraftManager.EncoderClick();
+   }
+
+   lastButtonState = currentButtonState;
