@@ -16,8 +16,8 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Apply TARS enhancements
-        run: git apply TARS_radar_enhancements.patch
-
+        run: python apply_tars_enhancements.py
+       
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
