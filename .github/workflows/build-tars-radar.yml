@@ -1,0 +1,43 @@
+name: Build TARS Radar Firmware
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Apply TARS enhancements
+        run: git apply TARS_radar_enhancements.patch
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install PlatformIO
+        run: pip install platformio
+
+      - name: Build firmware
+        run: pio run -e esp32-s3-devkitc
+
+      - name: Package firmware
+        run: |
+          mkdir firmware-output
+          cp .pio/build/esp32-s3-devkitc/firmware.bin firmware-output/TARS-flightRadar.bin
+          cp .pio/build/esp32-s3-devkitc/bootloader.bin firmware-output/bootloader.bin
+          cp .pio/build/esp32-s3-devkitc/partitions.bin firmware-output/partitions.bin
+
+      - name: Upload firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: TARS-flightRadar
+          path: firmware-output/
